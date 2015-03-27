@@ -17,7 +17,12 @@ public class Main {
 		
 		slave.spotRequest();
 		master.spotRequest();
-//		
+		
+		slave.waitUntilRunning();
+		master.waitUntilRunning();
+		
+		logger.info("System running!");
+		
 //		try {
 //			Thread.sleep(600*1000);
 //		} catch (InterruptedException e) {
