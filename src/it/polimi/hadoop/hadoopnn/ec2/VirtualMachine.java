@@ -357,6 +357,12 @@ public class VirtualMachine {
 				}
 			}
 			
+			try {
+				Thread.sleep(10*1000);
+			} catch (InterruptedException e) {
+				logger.error("Error while waiting.", e);
+			}
+			
 			InstanceStatus instanceStatus = getInstanceStatus(req.getInstanceId());
 			
 			while (instanceStatus == null || instanceStatus.getInstanceStatus().getStatus().equals("initializing")) {

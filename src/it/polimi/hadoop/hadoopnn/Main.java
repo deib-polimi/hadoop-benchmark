@@ -10,12 +10,16 @@ public class Main {
 	private static final Logger logger = LoggerFactory.getLogger(Main.class);
 
 	public static void main(String[] args) {
-//		VirtualMachine.createSecurityGroup();
+		VirtualMachine.createSecurityGroup();
 		
 		try {
+			logger.info("Initializing the environment...");
+			
 			VirtualMachine slave = VirtualMachine.getVM("slave");
 			VirtualMachine master = VirtualMachine.getVM("master");
 		
+			logger.info("Starting the system...");
+			
 			slave.spotRequest();
 			master.spotRequest();
 			
@@ -27,13 +31,16 @@ public class Main {
 			else
 				logger.error("There were some errors!");
 			
-//			try {
-//				Thread.sleep(600*1000);
-//			} catch (InterruptedException e) {
-//				logger.error("Error while waiting.", e);
-//			}
-//			
-//			slave.terminateAllSpots();
+			try {
+				Thread.sleep(60*1000);
+			} catch (InterruptedException e) {
+				logger.error("Error while waiting.", e);
+			}
+			
+			slave.terminateAllSpots();
+			master.terminateAllSpots();
+			
+			logger.info("System shutted down!");
 		} catch (Exception e) {
 			logger.error("Error found while running!", e);
 		}
