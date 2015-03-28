@@ -12,27 +12,31 @@ public class Main {
 	public static void main(String[] args) {
 //		VirtualMachine.createSecurityGroup();
 		
-		VirtualMachine slave = VirtualMachine.getVM("slave");
-		VirtualMachine master = VirtualMachine.getVM("master");
+		try {
+			VirtualMachine slave = VirtualMachine.getVM("slave");
+			VirtualMachine master = VirtualMachine.getVM("master");
 		
-		slave.spotRequest();
-		master.spotRequest();
-		
-		boolean running = slave.waitUntilRunning();
-		running = running && master.waitUntilRunning();
-		
-		if (running)
-			logger.info("System running!");
-		else
-			logger.error("There were some errors!");
-		
-//		try {
-//			Thread.sleep(600*1000);
-//		} catch (InterruptedException e) {
-//			logger.error("Error while waiting.", e);
-//		}
-//		
-//		slave.terminateAllSpots();
+			slave.spotRequest();
+			master.spotRequest();
+			
+			boolean running = slave.waitUntilRunning();
+			running = running && master.waitUntilRunning();
+			
+			if (running)
+				logger.info("System running!");
+			else
+				logger.error("There were some errors!");
+			
+//			try {
+//				Thread.sleep(600*1000);
+//			} catch (InterruptedException e) {
+//				logger.error("Error while waiting.", e);
+//			}
+//			
+//			slave.terminateAllSpots();
+		} catch (Exception e) {
+			logger.error("Error found while running!", e);
+		}
 	}
 
 }

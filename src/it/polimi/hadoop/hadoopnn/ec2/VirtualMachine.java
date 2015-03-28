@@ -1,6 +1,7 @@
 package it.polimi.hadoop.hadoopnn.ec2;
 
 import it.polimi.hadoop.hadoopnn.Configuration;
+import it.polimi.hadoop.hadoopnn.HadoopException;
 
 import java.io.FileInputStream;
 import java.net.URL;
@@ -66,7 +67,7 @@ public class VirtualMachine {
 		return String.format("VM: %s [%s], %d instance%s of size %s, %d GB of disk", name, ami, instances, instances == 1 ? "" : "s", size, diskSize);
 	}
 	
-	public static VirtualMachine getVM(String name) {
+	public static VirtualMachine getVM(String name) throws HadoopException {
 		try {
 			Properties prop = new Properties();
 			FileInputStream fis = new FileInputStream(Configuration.ACTUAL_CONFIGURATION);
@@ -93,12 +94,15 @@ public class VirtualMachine {
 				return new VirtualMachine(name, ami, Integer.valueOf(instances), size, Integer.valueOf(diskSize), maxPrice, os, keyName);
 			}
 		} catch (Exception e) {
-			logger.error("Error while loading the configuration.", e);
+			throw new HadoopException("Error while loading the configuration.", e);
 		}
-		return null;
+		throw new HadoopException("VM not found in the configuration file!");
 	}
 	
-	public VirtualMachine(String name, String ami, int instances, String size, int diskSize, double maxPrice, String os, String keyName) {
+	public VirtualMachine(String name, String ami, int instances, String size, int diskSize, double maxPrice, String os, String keyName) throws HadoopException {
+		if (Configuration.AWS_CREDENTIALS == null)
+			throw new HadoopException("You didn't provide a valid credentials file, aborting.");
+		
 		connect();
 		
 		this.ami = ami;
