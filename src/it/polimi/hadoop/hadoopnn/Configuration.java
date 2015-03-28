@@ -11,20 +11,20 @@ import java.util.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.amazonaws.auth.BasicAWSCredentials;
+import com.amazonaws.auth.AWSCredentials;
+import com.amazonaws.auth.PropertiesCredentials;
 
 public class Configuration {
 	
 	private static final Logger logger = LoggerFactory.getLogger(Configuration.class);
 	
-	public static String ACCESS_KEY_ID = "";
-	public static String SECRET_ACCESS_KEY = "";
-	public static BasicAWSCredentials AWS_CREDENTIALS = null;
+	public static AWSCredentials AWS_CREDENTIALS = null;
 	public static String REGION = "us-west-1";
 	
 	public static final String SECURITY_GROUP_NAME = "HadoopNN";
 	public static final String SECURITY_GROUP_DESC = "Security Group for HadoopNN";
 	
+	public static final String CREDENTIALS = "credentials.properties";
 	public static final String CONFIGURATION = "configuration.properties";
 	public static final String FIREWALL_RULES = "firewallrules.csv";
 	
@@ -46,8 +46,6 @@ public class Configuration {
 		FileOutputStream fos = new FileOutputStream(filePath);
 		Properties prop = new Properties();
 		
-		prop.put("ACCESS_KEY_ID", ACCESS_KEY_ID);
-		prop.put("SECRET_ACCESS_KEY", SECRET_ACCESS_KEY);
 		prop.put("REGION", REGION);
 		
 		prop.store(fos, "HadoopNN configuration properties");
@@ -59,12 +57,17 @@ public class Configuration {
 		FileInputStream fis = new FileInputStream(filePath);
 		prop.load(fis);
 		
-		ACCESS_KEY_ID = prop.getProperty("ACCESS_KEY_ID", ACCESS_KEY_ID);
-		SECRET_ACCESS_KEY = prop.getProperty("SECRET_ACCESS_KEY", SECRET_ACCESS_KEY);
-		if (ACCESS_KEY_ID != null && ACCESS_KEY_ID.length() > 0 && SECRET_ACCESS_KEY != null && SECRET_ACCESS_KEY.length() > 0)
-			AWS_CREDENTIALS = new BasicAWSCredentials(ACCESS_KEY_ID, SECRET_ACCESS_KEY);
-		else
+		String actualCredentials = CREDENTIALS;
+		URL url = Configuration.class.getResource(CREDENTIALS);
+		if (url == null)
+			actualCredentials = "/" + actualCredentials;
+		
+		try {
+			AWS_CREDENTIALS = new PropertiesCredentials(Configuration.class.getResourceAsStream(actualCredentials));
+		} catch (Exception e) {
 			AWS_CREDENTIALS = null;
+		}
+		
 		REGION = prop.getProperty("REGION", REGION);
 		
 		ACTUAL_CONFIGURATION = filePath;

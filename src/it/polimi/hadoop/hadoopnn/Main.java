@@ -18,10 +18,13 @@ public class Main {
 		slave.spotRequest();
 		master.spotRequest();
 		
-		slave.waitUntilRunning();
-		master.waitUntilRunning();
+		boolean running = slave.waitUntilRunning();
+		running = running && master.waitUntilRunning();
 		
-		logger.info("System running!");
+		if (running)
+			logger.info("System running!");
+		else
+			logger.error("There were some errors!");
 		
 //		try {
 //			Thread.sleep(600*1000);

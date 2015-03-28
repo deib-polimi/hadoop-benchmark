@@ -129,8 +129,8 @@ public class VirtualMachine {
 					userData += sc.nextLine() + "\n";
 				userData = String.format(
 						userData.trim(),
-						Configuration.ACCESS_KEY_ID,
-						Configuration.SECRET_ACCESS_KEY,
+						Configuration.AWS_CREDENTIALS.getAWSAccessKeyId(),
+						Configuration.AWS_CREDENTIALS.getAWSSecretKey(),
 						Configuration.REGION
 						);
 				logger.debug("Configuration for " + name + ":\n" + userData);
@@ -321,7 +321,10 @@ public class VirtualMachine {
 	}
 	
 	public boolean waitUntilRunning() {
-		boolean res = false;
+		if (spotRequestsIds.size() == 0) {
+			logger.error("You didn't start any machine!");
+			return false;
+		}
 		
 		for (String spotRequestId : spotRequestsIds) {
 			SpotInstanceRequest req = getSpotStatus(spotRequestId);
@@ -352,7 +355,7 @@ public class VirtualMachine {
 			
 			InstanceStatus instanceStatus = getInstanceStatus(req.getInstanceId());
 			
-			while (instanceStatus == null || !instanceStatus.getInstanceStatus().getStatus().equals("running")) {
+			while (instanceStatus == null || instanceStatus.getInstanceStatus().getStatus().equals("initializing")) {
 				try {
 					Thread.sleep(10*1000);
 					instanceStatus = getInstanceStatus(req.getInstanceId());
@@ -360,9 +363,13 @@ public class VirtualMachine {
 					logger.error("Error while waiting.", e);
 				}
 			}
+			if (!instanceStatus.getInstanceStatus().getStatus().equals("ok")) {
+				logger.error("The instance is in the " + instanceStatus.getInstanceStatus().getStatus() + " state!");
+				return false;
+			}
 		}
 		
-		return res;
+		return true;
 	}
 	
 	public void terminateAllSpots() {
