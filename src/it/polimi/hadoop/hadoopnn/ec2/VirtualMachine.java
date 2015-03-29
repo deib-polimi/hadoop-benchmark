@@ -4,7 +4,10 @@ import it.polimi.hadoop.hadoopnn.Configuration;
 import it.polimi.hadoop.hadoopnn.HadoopException;
 
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.PrintWriter;
 import java.net.URL;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
@@ -100,6 +103,9 @@ public class VirtualMachine {
 		if (Configuration.AWS_CREDENTIALS == null)
 			throw new HadoopException("You didn't provide a valid credentials file, aborting.");
 		
+		if (instances <= 0 || diskSize <= 0)
+			throw new HadoopException("There's some error in your configuration, aborting.");
+		
 		connect();
 		
 		this.ami = ami;
@@ -162,6 +168,8 @@ public class VirtualMachine {
 				} catch (Exception e) { }
 			}
 		}
+		
+		createSecurityGroup();
 	}
 	
 	public static AmazonEC2 connect() {
@@ -175,6 +183,9 @@ public class VirtualMachine {
 	}
 
 	public static void createSecurityGroup() {
+		if (Paths.get(Configuration.SECURITY_GROUP_FILE_NAME).toFile().exists())
+			return;
+		
 		connect();
 		
 		try {
@@ -202,6 +213,14 @@ public class VirtualMachine {
 		    client.authorizeSecurityGroupIngress(ingressRequest);
 		} catch (AmazonServiceException e) {
 			logger.error("Error while setting the security group: it probably was already set.", e);
+		}
+		
+		try (
+				PrintWriter out = new PrintWriter(new FileOutputStream(Paths.get(Configuration.SECURITY_GROUP_FILE_NAME).toFile()));
+			) {
+			out.println("done");
+		} catch (Exception e) {
+			logger.error("Error while creating the file.", e);
 		}
 	}
 	

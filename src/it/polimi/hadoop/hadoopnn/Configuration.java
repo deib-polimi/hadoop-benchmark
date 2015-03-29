@@ -27,6 +27,8 @@ public class Configuration {
 	public static final String CREDENTIALS = "credentials.properties";
 	public static final String CONFIGURATION = "configuration.properties";
 	public static final String FIREWALL_RULES = "firewallrules.csv";
+
+	public static final String SECURITY_GROUP_FILE_NAME = "securitygroupcreated.txt";
 	
 	public static String ACTUAL_CONFIGURATION = CONFIGURATION;
 	

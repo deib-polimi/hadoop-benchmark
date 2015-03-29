@@ -10,8 +10,6 @@ public class Main {
 	private static final Logger logger = LoggerFactory.getLogger(Main.class);
 
 	public static void main(String[] args) {
-		VirtualMachine.createSecurityGroup();
-		
 		try {
 			logger.info("Initializing the environment...");
 			
