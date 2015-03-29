@@ -32,13 +32,11 @@ import com.amazonaws.services.ec2.model.DescribeSpotInstanceRequestsResult;
 import com.amazonaws.services.ec2.model.DescribeSpotPriceHistoryRequest;
 import com.amazonaws.services.ec2.model.DescribeSpotPriceHistoryResult;
 import com.amazonaws.services.ec2.model.EbsBlockDevice;
-import com.amazonaws.services.ec2.model.InstanceStatus;
 import com.amazonaws.services.ec2.model.IpPermission;
 import com.amazonaws.services.ec2.model.LaunchSpecification;
 import com.amazonaws.services.ec2.model.RequestSpotInstancesRequest;
 import com.amazonaws.services.ec2.model.RequestSpotInstancesResult;
 import com.amazonaws.services.ec2.model.SpotInstanceRequest;
-import com.amazonaws.services.ec2.model.SpotInstanceStatus;
 import com.amazonaws.services.ec2.model.TerminateInstancesRequest;
 import com.amazonaws.util.Base64;
 
@@ -60,8 +58,7 @@ public class VirtualMachine {
 	@SuppressWarnings("unused")
 	private String os;
 	private String keyName;
-	private List<String> spotRequestsIds;
-	private List<String> instanceIds;
+	private List<Instance> instancesSet;
 	
 	public String toString() {
 		return String.format("VM: %s [%s], %d instance%s of size %s, %d GB of disk", name, ami, instances, instances == 1 ? "" : "s", size, diskSize);
@@ -114,8 +111,7 @@ public class VirtualMachine {
 		this.os = os;
 		this.keyName = keyName;
 		
-		spotRequestsIds = new ArrayList<String>();
-		instanceIds = new ArrayList<String>();
+		instancesSet = new ArrayList<VirtualMachine.Instance>();
 		
 		logger.debug(toString());
 		
@@ -282,13 +278,11 @@ public class VirtualMachine {
 		RequestSpotInstancesResult requestResult = client.requestSpotInstances(requestRequest);
 		
 		List<SpotInstanceRequest> reqs = requestResult.getSpotInstanceRequests();
-		for (SpotInstanceRequest req : reqs) {
-			spotRequestsIds.add(req.getSpotInstanceRequestId());
-			instanceIds.add(req.getInstanceId());
-		}
+		for (SpotInstanceRequest req : reqs)
+			instancesSet.add(new Instance(req.getInstanceId(), req.getSpotInstanceRequestId()));
 	}
 	
-	public static SpotInstanceRequest getSpotStatus(String spotRequestId) {
+	public static SpotState getSpotStatus(String spotRequestId) {
 		connect();
 		
 		DescribeSpotInstanceRequestsRequest spotInstanceReq = new DescribeSpotInstanceRequestsRequest();
@@ -299,10 +293,10 @@ public class VirtualMachine {
 		
 		List<SpotInstanceRequest> reqs = res.getSpotInstanceRequests();
 		if (reqs.size() > 0)
-			return reqs.get(0);
+			return SpotState.valueFromRequest(reqs.get(0));
 		else {
 			logger.error("No spot request found for the given id (" + spotRequestId + ").");
-			return null;
+			return SpotState.SPOT_REQUEST_NOT_FOUND;
 		}
 	}
 	
@@ -315,46 +309,39 @@ public class VirtualMachine {
 		instanceReq.setInstanceIds(instanceIds);
 		DescribeInstanceStatusResult instanceRes = client.describeInstanceStatus(instanceReq);
 		
-		List<InstanceStatus> reqs = instanceRes.getInstanceStatuses();
+		List<com.amazonaws.services.ec2.model.InstanceStatus> reqs = instanceRes.getInstanceStatuses();
 		if (reqs.size() > 0)
-			return reqs.get(0);
+			return InstanceStatus.valueFromStatus(reqs.get(0));
 		else {
 			logger.error("No instance found for the given id (" + instanceId + ").");
-			return null;
+			return InstanceStatus.INSTANCE_NOT_FOUND;
 		}
 	}
 	
 	public boolean waitUntilRunning() {
-		if (spotRequestsIds.size() == 0) {
+		if (instancesSet.size() == 0) {
 			logger.error("You didn't start any machine!");
 			return false;
 		}
 		
-		for (String spotRequestId : spotRequestsIds) {
-			SpotInstanceRequest req = getSpotStatus(spotRequestId);
+		for (Instance i : instancesSet) {
+			String instanceId = i.id;
+			String spotRequestId = i.spotRequestId;
 			
-			SpotInstanceStatus spotStatus = req.getStatus();
-			spotStatus.getMessage();
-			String spotState = req.getState();
+			SpotState spotState = getSpotStatus(spotRequestId);
 			
-			if (spotState.equals("cancelled") || spotState.equals("failed")) {
-				logger.error("The spot request is in the " + spotState + " state!");
-				return false;
-			} else if (spotState.equals("open")) {
-				String status = "";
-				while ((status = req.getStatus().getCode()).equals("pending-evaluation") || status.equals("pending-fulfillment")) {
-					try {
-						Thread.sleep(10*1000);
-						req = getSpotStatus(spotRequestId);
-					} catch (InterruptedException e) {
-						logger.error("Error while waiting.", e);
-					}
+			while (spotState == SpotState.OPEN) {
+				try {
+					Thread.sleep(10*1000);
+					spotState = getSpotStatus(spotRequestId);
+				} catch (InterruptedException e) {
+					logger.error("Error while waiting.", e);
 				}
+			}
 				
-				if (!req.getState().equals("active")) {
-					logger.error("The spot request failed to start and is in the " + spotState + " state!");
-					return false;
-				}
+			if (spotState != SpotState.ACTIVE) {
+				logger.error("The spot request failed to start and is in the " + spotState.getState() + " state!");
+				return false;
 			}
 			
 			try {
@@ -363,18 +350,18 @@ public class VirtualMachine {
 				logger.error("Error while waiting.", e);
 			}
 			
-			InstanceStatus instanceStatus = getInstanceStatus(req.getInstanceId());
+			InstanceStatus instanceStatus = getInstanceStatus(instanceId);
 			
-			while (instanceStatus == null || instanceStatus.getInstanceStatus().getStatus().equals("initializing")) {
+			while (instanceStatus == InstanceStatus.INSTANCE_NOT_FOUND || instanceStatus == InstanceStatus.INITIALIZING) {
 				try {
 					Thread.sleep(10*1000);
-					instanceStatus = getInstanceStatus(req.getInstanceId());
+					instanceStatus = getInstanceStatus(instanceId);
 				} catch (InterruptedException e) {
 					logger.error("Error while waiting.", e);
 				}
 			}
-			if (!instanceStatus.getInstanceStatus().getStatus().equals("ok")) {
-				logger.error("The instance is in the " + instanceStatus.getInstanceStatus().getStatus() + " state!");
+			if (instanceStatus != InstanceStatus.OK) {
+				logger.error("The instance is in the " + instanceStatus.getStatus() + " state!");
 				return false;
 			}
 		}
@@ -383,21 +370,29 @@ public class VirtualMachine {
 	}
 	
 	public void terminateAllSpots() {
-		if (spotRequestsIds.size() == 0 || instanceIds.size() == 0)
+		if (instancesSet.size() == 0)
 			return;
+		
+		List<String> spotRequestsIds = new ArrayList<String>();
+		List<String> instanceIds = new ArrayList<String>();
+		
+		for (Instance i : instancesSet) {
+			spotRequestsIds.add(i.spotRequestId);
+			instanceIds.add(i.id);
+		}
 		
 		try {
 			terminateSpotRequests(spotRequestsIds);
-			spotRequestsIds.clear();
 		} catch (Exception e) {
 			logger.error("Error cancelling spot requests.", e);
 		}
 		try {
 			terminateInstances(instanceIds);
-			instanceIds.clear();
 		} catch (Exception e) {
 			logger.error("Error cancelling instances.", e);
 		}
+		
+		instancesSet.clear();
 	}
 	
 	private void terminateSpotRequests(List<String> spotInstanceRequestIds) throws AmazonServiceException {
@@ -430,6 +425,68 @@ public class VirtualMachine {
 		
 		public String toString() {
 			return String.format("%s\t%d\t%d\t%s", ip, from, to, protocol);
+		}
+	}
+	
+	public static class Instance {
+		public String id;
+		public String spotRequestId;
+		
+		public Instance(String id, String spotRequestId) {
+			this.id = id;
+			this.spotRequestId = spotRequestId;
+		}
+	}
+	
+	public static enum InstanceStatus {
+		INITIALIZING("initializing"), OK("ok"), INSTANCE_NOT_FOUND("instance not found"), ERROR("error");
+		
+		String status;
+		
+		private InstanceStatus(String status) {
+			this.status = status;
+		}
+		
+		public String getStatus() {
+			return status;
+		}
+		
+		public static InstanceStatus valueFromStatus(String status) {
+			InstanceStatus[] values = InstanceStatus.values();
+			for (InstanceStatus i : values)
+				if (i.status.equals(status))
+					return i;
+			return ERROR;
+		}
+		
+		public static InstanceStatus valueFromStatus(com.amazonaws.services.ec2.model.InstanceStatus status) {
+			return valueFromStatus(status.getInstanceStatus().getStatus());
+		}
+	}
+	
+	public static enum SpotState {
+		OPEN("open"), ACTIVE("active"), CANCELLED("cancelled"), FAILED("failed"), SPOT_REQUEST_NOT_FOUND("spot request not found"), ERROR("error");
+		
+		String state;
+		
+		private SpotState(String state) {
+			this.state = state;
+		}
+		
+		public static SpotState valueFromRequest(SpotInstanceRequest spotInstanceRequest) {
+			return valueFromState(spotInstanceRequest.getState());
+		}
+
+		public String getState() {
+			return state;
+		}
+		
+		public static SpotState valueFromState(String state) {
+			SpotState[] values = SpotState.values();
+			for (SpotState i : values)
+				if (i.state.equals(state))
+					return i;
+			return ERROR;
 		}
 	}
 	
