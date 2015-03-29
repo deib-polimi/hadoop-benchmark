@@ -182,7 +182,7 @@ public class VirtualMachine {
 		return client;
 	}
 
-	public static void createSecurityGroup() {
+	private static void createSecurityGroup() {
 		if (Paths.get(Configuration.SECURITY_GROUP_FILE_NAME).toFile().exists())
 			return;
 		
@@ -301,30 +301,42 @@ public class VirtualMachine {
 			instancesSet.add(new Instance(req.getInstanceId(), req.getSpotInstanceRequestId()));
 	}
 	
-	public static SpotState getSpotStatus(String spotRequestId) {
+	public static SpotState getSpotStatus(Instance i) {
+		if (i.spotRequestId == null)
+			return SpotState.SPOT_REQUEST_NOT_FOUND;
+		
 		connect();
 		
 		DescribeSpotInstanceRequestsRequest spotInstanceReq = new DescribeSpotInstanceRequestsRequest();
 		List<String> spotInstanceRequestIds = new ArrayList<String>();
-		spotInstanceRequestIds.add(spotRequestId);
+		spotInstanceRequestIds.add(i.spotRequestId);
 		spotInstanceReq.setSpotInstanceRequestIds(spotInstanceRequestIds);
 		DescribeSpotInstanceRequestsResult res = client.describeSpotInstanceRequests(spotInstanceReq);
 		
 		List<SpotInstanceRequest> reqs = res.getSpotInstanceRequests();
-		if (reqs.size() > 0)
-			return SpotState.valueFromRequest(reqs.get(0));
+		if (reqs.size() > 0) {
+			SpotInstanceRequest req = reqs.get(0);
+			i.id = req.getInstanceId();
+			return SpotState.valueFromRequest(req);
+		}
 		else {
-			logger.error("No spot request found for the given id (" + spotRequestId + ").");
+			logger.error("No spot request found for the given id (" + i.spotRequestId + ").");
 			return SpotState.SPOT_REQUEST_NOT_FOUND;
 		}
 	}
 	
-	public static InstanceStatus getInstanceStatus(String instanceId) {
+	public static InstanceStatus getInstanceStatus(Instance i) {
+		if (i.id == null) {
+			getSpotStatus(i);
+			if (i.id == null)
+				return InstanceStatus.INSTANCE_NOT_FOUND;
+		}
+		
 		connect();
 		
 		DescribeInstanceStatusRequest instanceReq = new DescribeInstanceStatusRequest();
 		List<String> instanceIds = new ArrayList<String>();
-		instanceIds.add(instanceId);
+		instanceIds.add(i.id);
 		instanceReq.setInstanceIds(instanceIds);
 		DescribeInstanceStatusResult instanceRes = client.describeInstanceStatus(instanceReq);
 		
@@ -332,7 +344,7 @@ public class VirtualMachine {
 		if (reqs.size() > 0)
 			return InstanceStatus.valueFromStatus(reqs.get(0));
 		else {
-			logger.error("No instance found for the given id (" + instanceId + ").");
+			logger.error("No instance found for the given id (" + i.id + ").");
 			return InstanceStatus.INSTANCE_NOT_FOUND;
 		}
 	}
@@ -344,15 +356,12 @@ public class VirtualMachine {
 		}
 		
 		for (Instance i : instancesSet) {
-			String instanceId = i.id;
-			String spotRequestId = i.spotRequestId;
-			
-			SpotState spotState = getSpotStatus(spotRequestId);
+			SpotState spotState = getSpotStatus(i);
 			
 			while (spotState == SpotState.OPEN) {
 				try {
 					Thread.sleep(10*1000);
-					spotState = getSpotStatus(spotRequestId);
+					spotState = getSpotStatus(i);
 				} catch (InterruptedException e) {
 					logger.error("Error while waiting.", e);
 				}
@@ -369,12 +378,12 @@ public class VirtualMachine {
 				logger.error("Error while waiting.", e);
 			}
 			
-			InstanceStatus instanceStatus = getInstanceStatus(instanceId);
+			InstanceStatus instanceStatus = getInstanceStatus(i);
 			
 			while (instanceStatus == InstanceStatus.INSTANCE_NOT_FOUND || instanceStatus == InstanceStatus.INITIALIZING) {
 				try {
 					Thread.sleep(10*1000);
-					instanceStatus = getInstanceStatus(instanceId);
+					instanceStatus = getInstanceStatus(i);
 				} catch (InterruptedException e) {
 					logger.error("Error while waiting.", e);
 				}
@@ -397,7 +406,8 @@ public class VirtualMachine {
 		
 		for (Instance i : instancesSet) {
 			spotRequestsIds.add(i.spotRequestId);
-			instanceIds.add(i.id);
+			if (i.id != null)
+				instanceIds.add(i.id);
 		}
 		
 		try {
@@ -414,14 +424,14 @@ public class VirtualMachine {
 		instancesSet.clear();
 	}
 	
-	private void terminateSpotRequests(List<String> spotInstanceRequestIds) throws AmazonServiceException {
+	public static void terminateSpotRequests(List<String> spotInstanceRequestIds) throws AmazonServiceException {
 		connect();
 		
 		CancelSpotInstanceRequestsRequest cancelRequest = new CancelSpotInstanceRequestsRequest(spotInstanceRequestIds);
 		client.cancelSpotInstanceRequests(cancelRequest);
 	}
 	
-	private void terminateInstances(List<String> instanceIds) throws AmazonServiceException {
+	public static void terminateInstances(List<String> instanceIds) throws AmazonServiceException {
 		connect();
 		
 	    TerminateInstancesRequest terminateRequest = new TerminateInstancesRequest(instanceIds);
