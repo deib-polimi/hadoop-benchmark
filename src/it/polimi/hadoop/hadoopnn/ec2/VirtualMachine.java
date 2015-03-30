@@ -378,7 +378,7 @@ public class VirtualMachine {
 		DescribeInstancesResult instanceRes = client.describeInstances(instanceReq);
 		
 		try {
-			return instanceRes.getReservations().get(0).getInstances().get(0).getPrivateIpAddress();
+			return instanceRes.getReservations().get(0).getInstances().get(0).getPublicIpAddress();
 		} catch (Exception e) {
 			logger.error("Error while getting the IP.", e);
 			return null;
