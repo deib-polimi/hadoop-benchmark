@@ -388,6 +388,10 @@ public class VirtualMachine {
 	}
 	
 	public boolean waitUntilRunning() {
+		return waitUntilRunning(false);
+	}
+	
+	public boolean waitUntilRunning(boolean initializedIsEnough) {
 		if (instancesSet.size() == 0) {
 			logger.error("You didn't start any machine!");
 			return false;
@@ -420,8 +424,12 @@ public class VirtualMachine {
 			
 			while (instanceStatus == InstanceStatus.INSTANCE_NOT_FOUND || instanceStatus == InstanceStatus.INITIALIZING) {
 				try {
-					Thread.sleep(10*1000);
-					instanceStatus = getInstanceStatus(i);
+					if (instanceStatus == InstanceStatus.INITIALIZING && initializedIsEnough) {
+						instanceStatus = InstanceStatus.OK;
+					} else {
+						Thread.sleep(10*1000);
+						instanceStatus = getInstanceStatus(i);
+					}
 				} catch (InterruptedException e) {
 					logger.error("Error while waiting.", e);
 				}

@@ -19,7 +19,7 @@ public class Main {
 			logger.info("Starting the system...");
 			
 			slave.spotRequest();
-			boolean running = slave.waitUntilRunning();
+			boolean running = slave.waitUntilRunning(true);
 			
 			master.spotRequest();
 			running = running && master.waitUntilRunning();
