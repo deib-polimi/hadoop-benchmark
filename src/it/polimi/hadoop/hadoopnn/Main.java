@@ -19,10 +19,16 @@ public class Main {
 			logger.info("Starting the system...");
 			
 			slave.spotRequest();
-			master.spotRequest();
-			
 			boolean running = slave.waitUntilRunning();
+			
+			master.spotRequest();
 			running = running && master.waitUntilRunning();
+			
+			for (String s : slave.getIps())
+				logger.info("IP for slave: {}", s);
+			
+			for (String s : master.getIps())
+				logger.info("IP for master: {}", s);
 			
 			if (running)
 				logger.info("System running!");
@@ -35,10 +41,10 @@ public class Main {
 				logger.error("Error while waiting.", e);
 			}
 			
-			slave.terminateAllSpots();
-			master.terminateAllSpots();
-			
-			logger.info("System shutted down!");
+//			slave.terminateAllSpots();
+//			master.terminateAllSpots();
+//			
+//			logger.info("System shutted down!");
 		} catch (Exception e) {
 			logger.error("Error found while running!", e);
 		}

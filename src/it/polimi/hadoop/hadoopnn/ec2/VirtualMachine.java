@@ -30,6 +30,8 @@ import com.amazonaws.services.ec2.model.DescribeAvailabilityZonesRequest;
 import com.amazonaws.services.ec2.model.DescribeAvailabilityZonesResult;
 import com.amazonaws.services.ec2.model.DescribeInstanceStatusRequest;
 import com.amazonaws.services.ec2.model.DescribeInstanceStatusResult;
+import com.amazonaws.services.ec2.model.DescribeInstancesRequest;
+import com.amazonaws.services.ec2.model.DescribeInstancesResult;
 import com.amazonaws.services.ec2.model.DescribeSpotInstanceRequestsRequest;
 import com.amazonaws.services.ec2.model.DescribeSpotInstanceRequestsResult;
 import com.amazonaws.services.ec2.model.DescribeSpotPriceHistoryRequest;
@@ -347,6 +349,42 @@ public class VirtualMachine {
 			logger.error("No instance found for the given id (" + i.id + ").");
 			return InstanceStatus.INSTANCE_NOT_FOUND;
 		}
+	}
+	
+	public List<String> getIps() {
+		List<String> res = new ArrayList<String>();
+		for (Instance i : instancesSet) {
+			String ip = getInstanceIp(i);
+			if (ip != null)
+				res.add(ip);
+		}
+		return res;
+	}
+	
+	public static String getInstanceIp(Instance i) {
+		if (i.id == null) {
+			getSpotStatus(i);
+			if (i.id == null)
+				return null;
+		}
+		
+		connect();
+		
+		DescribeInstancesRequest instanceReq = new DescribeInstancesRequest();
+		List<String> instanceIds = new ArrayList<String>();
+		instanceIds.add(i.id);
+		instanceReq.setInstanceIds(instanceIds);
+		
+		DescribeInstancesResult instanceRes = client.describeInstances(instanceReq);
+		
+		try {
+			return instanceRes.getReservations().get(0).getInstances().get(0).getPrivateIpAddress();
+		} catch (Exception e) {
+			logger.error("Error while getting the IP.", e);
+			return null;
+		}
+		
+		
 	}
 	
 	public boolean waitUntilRunning() {
