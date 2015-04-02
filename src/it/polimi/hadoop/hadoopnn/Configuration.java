@@ -1,5 +1,7 @@
 package it.polimi.hadoop.hadoopnn;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -44,6 +46,12 @@ public class Configuration {
 	}
 	
 	public static InputStream getInputStream(String filePath) {
+		File f = new File(filePath);
+		if (f.exists())
+			try {
+				return new FileInputStream(f);
+			} catch (Exception e) { }
+		
 		InputStream is = Configuration.class.getResourceAsStream(filePath);
 		if (is == null)
 			is = Configuration.class.getResourceAsStream("/" + filePath);
