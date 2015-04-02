@@ -41,10 +41,10 @@ public class Main {
 				logger.error("Error while waiting.", e);
 			}
 			
-//			slave.terminateAllSpots();
-//			master.terminateAllSpots();
-//			
-//			logger.info("System shutted down!");
+			slave.terminateAllSpots();
+			master.terminateAllSpots();
+			
+			logger.info("System shutted down!");
 		} catch (Exception e) {
 			logger.error("Error found while running!", e);
 		}

@@ -2,14 +2,16 @@ package it.polimi.hadoop.hadoopnn.ec2;
 
 import it.polimi.hadoop.hadoopnn.Configuration;
 import it.polimi.hadoop.hadoopnn.HadoopException;
+import it.polimi.hadoop.hadoopnn.Ssh;
 
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.io.PrintWriter;
-import java.net.URL;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Scanner;
 
@@ -49,7 +51,7 @@ public class VirtualMachine {
 	
 	private static final Logger logger = LoggerFactory.getLogger(VirtualMachine.class);
 	
-	public static final double PRICE_MARGIN = 0.2;
+public static final double PRICE_MARGIN = 0.2;
 	
 	private static AmazonEC2 client = null;
 	
@@ -65,15 +67,27 @@ public class VirtualMachine {
 	private String keyName;
 	private List<Instance> instancesSet;
 	
+	private Map<String, String> otherParams;
+	
+	private String sshUser;
+	private String sshPassword;
+	
+	public List<Instance> getInstances() {
+		return instancesSet;
+	}
+	
 	public String toString() {
 		return String.format("VM: %s [%s], %d instance%s of size %s, %d GB of disk", name, ami, instances, instances == 1 ? "" : "s", size, diskSize);
+	}
+	
+	public String getParameter(String name) {
+		return otherParams.get(name);
 	}
 	
 	public static VirtualMachine getVM(String name) throws HadoopException {
 		try {
 			Properties prop = new Properties();
-			FileInputStream fis = new FileInputStream(Configuration.ACTUAL_CONFIGURATION);
-			prop.load(fis);
+			prop.load(Configuration.getInputStream(Configuration.CONFIGURATION));
 			
 			String ami = prop.getProperty(name + "_AMI");
 			String size = prop.getProperty(name + "_SIZE");
@@ -81,8 +95,18 @@ public class VirtualMachine {
 			String diskSize = prop.getProperty(name + "_DISK");
 			String os = prop.getProperty(name + "_OS");
 			String keyName = prop.getProperty(name + "_KEYPAIR_NAME");
+			String sshUser = prop.getProperty(name + "_SSH_USER");
+			String sshPassword = prop.getProperty(name + "_SSH_PASS");
 			
-			if (ami != null && size != null && instances != null && diskSize != null && os != null && keyName != null) {
+			Map<String, String> otherParams = new HashMap<String, String>();
+			
+			for (Object o : prop.keySet()) {
+				String key = (String)o;
+				if (key.startsWith(name + "_"))
+					otherParams.put(key.substring((name + "_").length()), prop.getProperty(key));
+			}
+			
+			if (ami != null && size != null && instances != null && diskSize != null && os != null && keyName != null && sshUser != null && sshPassword != null) {
 				double[] pricesInRegion = getPricesInRegion(size, os);
 				if (pricesInRegion.length == 0)
 					return null;
@@ -93,7 +117,7 @@ public class VirtualMachine {
 				
 				maxPrice += PRICE_MARGIN;
 				
-				return new VirtualMachine(name, ami, Integer.valueOf(instances), size, Integer.valueOf(diskSize), maxPrice, os, keyName);
+				return new VirtualMachine(name, ami, Integer.valueOf(instances), size, Integer.valueOf(diskSize), maxPrice, os, keyName, sshUser, sshPassword, otherParams);
 			}
 		} catch (Exception e) {
 			throw new HadoopException("Error while loading the configuration.", e);
@@ -101,7 +125,7 @@ public class VirtualMachine {
 		throw new HadoopException("VM not found in the configuration file!");
 	}
 	
-	public VirtualMachine(String name, String ami, int instances, String size, int diskSize, double maxPrice, String os, String keyName) throws HadoopException {
+	public VirtualMachine(String name, String ami, int instances, String size, int diskSize, double maxPrice, String os, String keyName, String sshUser, String sshPassword, Map<String, String> otherParams) throws HadoopException {
 		if (Configuration.AWS_CREDENTIALS == null)
 			throw new HadoopException("You didn't provide a valid credentials file, aborting.");
 		
@@ -118,19 +142,22 @@ public class VirtualMachine {
 		this.diskSize = diskSize;
 		this.os = os;
 		this.keyName = keyName;
+		this.sshUser = sshUser;
+		this.sshPassword = sshPassword;
+		
+		this.otherParams = otherParams;
 		
 		instancesSet = new ArrayList<VirtualMachine.Instance>();
 		
 		logger.debug(toString());
 		
 		String file = "configuration-" + name + ".txt";
-		URL u = VirtualMachine.class.getResource(file);
-		if (u == null)
-			file = "/" + file;
-		u = VirtualMachine.class.getResource(file);
-		if (u != null)
+		
+		InputStream is = Configuration.getInputStream(file);
+		
+		if (is != null)
 			try (
-				Scanner sc = new Scanner(VirtualMachine.class.getResourceAsStream(file));
+				Scanner sc = new Scanner(is);
 				) {
 				userData = "";
 				while (sc.hasNextLine())
@@ -151,13 +178,8 @@ public class VirtualMachine {
 	static {
 		firewallRules = new ArrayList<FirewallRule>();
 		
-		String file = Configuration.FIREWALL_RULES;
-		URL url = Configuration.class.getResource(file);
-		if (url == null)
-			file = "/" + file;
-		
 		try (
-			Scanner sc = new Scanner(VirtualMachine.class.getResourceAsStream(file));
+			Scanner sc = new Scanner(Configuration.getInputStream(Configuration.FIREWALL_RULES));
 			) {
 			if (sc.hasNextLine())
 				sc.nextLine();
@@ -273,7 +295,8 @@ public class VirtualMachine {
 		LaunchSpecification launchSpecification = new LaunchSpecification();
 		launchSpecification.setImageId(ami);
 		launchSpecification.setInstanceType(size);
-		launchSpecification.setUserData(Base64.encodeAsString(userData.getBytes()));
+		if (userData != null)
+			launchSpecification.setUserData(Base64.encodeAsString(userData.getBytes()));
 		
         BlockDeviceMapping blockDeviceMapping = new BlockDeviceMapping();
         blockDeviceMapping.setDeviceName("/dev/sda1");
@@ -300,91 +323,17 @@ public class VirtualMachine {
 		
 		List<SpotInstanceRequest> reqs = requestResult.getSpotInstanceRequests();
 		for (SpotInstanceRequest req : reqs)
-			instancesSet.add(new Instance(req.getInstanceId(), req.getSpotInstanceRequestId()));
-	}
-	
-	public static SpotState getSpotStatus(Instance i) {
-		if (i.spotRequestId == null)
-			return SpotState.SPOT_REQUEST_NOT_FOUND;
-		
-		connect();
-		
-		DescribeSpotInstanceRequestsRequest spotInstanceReq = new DescribeSpotInstanceRequestsRequest();
-		List<String> spotInstanceRequestIds = new ArrayList<String>();
-		spotInstanceRequestIds.add(i.spotRequestId);
-		spotInstanceReq.setSpotInstanceRequestIds(spotInstanceRequestIds);
-		DescribeSpotInstanceRequestsResult res = client.describeSpotInstanceRequests(spotInstanceReq);
-		
-		List<SpotInstanceRequest> reqs = res.getSpotInstanceRequests();
-		if (reqs.size() > 0) {
-			SpotInstanceRequest req = reqs.get(0);
-			i.id = req.getInstanceId();
-			return SpotState.valueFromRequest(req);
-		}
-		else {
-			logger.error("No spot request found for the given id (" + i.spotRequestId + ").");
-			return SpotState.SPOT_REQUEST_NOT_FOUND;
-		}
-	}
-	
-	public static InstanceStatus getInstanceStatus(Instance i) {
-		if (i.id == null) {
-			getSpotStatus(i);
-			if (i.id == null)
-				return InstanceStatus.INSTANCE_NOT_FOUND;
-		}
-		
-		connect();
-		
-		DescribeInstanceStatusRequest instanceReq = new DescribeInstanceStatusRequest();
-		List<String> instanceIds = new ArrayList<String>();
-		instanceIds.add(i.id);
-		instanceReq.setInstanceIds(instanceIds);
-		DescribeInstanceStatusResult instanceRes = client.describeInstanceStatus(instanceReq);
-		
-		List<com.amazonaws.services.ec2.model.InstanceStatus> reqs = instanceRes.getInstanceStatuses();
-		if (reqs.size() > 0)
-			return InstanceStatus.valueFromStatus(reqs.get(0));
-		else {
-			logger.error("No instance found for the given id (" + i.id + ").");
-			return InstanceStatus.INSTANCE_NOT_FOUND;
-		}
+			instancesSet.add(new Instance(this, req.getInstanceId(), req.getSpotInstanceRequestId()));
 	}
 	
 	public List<String> getIps() {
 		List<String> res = new ArrayList<String>();
 		for (Instance i : instancesSet) {
-			String ip = getInstanceIp(i);
+			String ip = i.getIp();
 			if (ip != null)
 				res.add(ip);
 		}
 		return res;
-	}
-	
-	public static String getInstanceIp(Instance i) {
-		if (i.id == null) {
-			getSpotStatus(i);
-			if (i.id == null)
-				return null;
-		}
-		
-		connect();
-		
-		DescribeInstancesRequest instanceReq = new DescribeInstancesRequest();
-		List<String> instanceIds = new ArrayList<String>();
-		instanceIds.add(i.id);
-		instanceReq.setInstanceIds(instanceIds);
-		
-		DescribeInstancesResult instanceRes = client.describeInstances(instanceReq);
-		
-		try {
-			return instanceRes.getReservations().get(0).getInstances().get(0).getPublicIpAddress();
-		} catch (Exception e) {
-			logger.error("Error while getting the IP.", e);
-			return null;
-		}
-		
-		
 	}
 	
 	public boolean waitUntilRunning() {
@@ -398,46 +347,9 @@ public class VirtualMachine {
 		}
 		
 		for (Instance i : instancesSet) {
-			SpotState spotState = getSpotStatus(i);
-			
-			while (spotState == SpotState.OPEN) {
-				try {
-					Thread.sleep(10*1000);
-					spotState = getSpotStatus(i);
-				} catch (InterruptedException e) {
-					logger.error("Error while waiting.", e);
-				}
-			}
-				
-			if (spotState != SpotState.ACTIVE) {
-				logger.error("The spot request failed to start and is in the " + spotState.getState() + " state!");
+			boolean res = i.waitUntilRunning(initializedIsEnough);
+			if (res == false)
 				return false;
-			}
-			
-			try {
-				Thread.sleep(10*1000);
-			} catch (InterruptedException e) {
-				logger.error("Error while waiting.", e);
-			}
-			
-			InstanceStatus instanceStatus = getInstanceStatus(i);
-			
-			while (instanceStatus == InstanceStatus.INSTANCE_NOT_FOUND || instanceStatus == InstanceStatus.INITIALIZING) {
-				try {
-					if (instanceStatus == InstanceStatus.INITIALIZING && initializedIsEnough) {
-						instanceStatus = InstanceStatus.OK;
-					} else {
-						Thread.sleep(10*1000);
-						instanceStatus = getInstanceStatus(i);
-					}
-				} catch (InterruptedException e) {
-					logger.error("Error while waiting.", e);
-				}
-			}
-			if (instanceStatus != InstanceStatus.OK) {
-				logger.error("The instance is in the " + instanceStatus.getStatus() + " state!");
-				return false;
-			}
 		}
 		
 		return true;
@@ -447,41 +359,10 @@ public class VirtualMachine {
 		if (instancesSet.size() == 0)
 			return;
 		
-		List<String> spotRequestsIds = new ArrayList<String>();
-		List<String> instanceIds = new ArrayList<String>();
-		
-		for (Instance i : instancesSet) {
-			spotRequestsIds.add(i.spotRequestId);
-			if (i.id != null)
-				instanceIds.add(i.id);
-		}
-		
-		try {
-			terminateSpotRequests(spotRequestsIds);
-		} catch (Exception e) {
-			logger.error("Error cancelling spot requests.", e);
-		}
-		try {
-			terminateInstances(instanceIds);
-		} catch (Exception e) {
-			logger.error("Error cancelling instances.", e);
-		}
+		for (Instance i : instancesSet)
+			i.terminate();
 		
 		instancesSet.clear();
-	}
-	
-	public static void terminateSpotRequests(List<String> spotInstanceRequestIds) throws AmazonServiceException {
-		connect();
-		
-		CancelSpotInstanceRequestsRequest cancelRequest = new CancelSpotInstanceRequestsRequest(spotInstanceRequestIds);
-		client.cancelSpotInstanceRequests(cancelRequest);
-	}
-	
-	public static void terminateInstances(List<String> instanceIds) throws AmazonServiceException {
-		connect();
-		
-	    TerminateInstancesRequest terminateRequest = new TerminateInstancesRequest(instanceIds);
-	    client.terminateInstances(terminateRequest);
 	}
 	
 	public static class FirewallRule {
@@ -507,9 +388,193 @@ public class VirtualMachine {
 		public String id;
 		public String spotRequestId;
 		
-		public Instance(String id, String spotRequestId) {
+		private VirtualMachine vm;
+		
+		private String ip;
+		
+		public String getParameter(String name) {
+			return vm.getParameter(name);
+		}
+		
+		public String getSshUser() {
+			return vm.sshUser;
+		}
+		
+		public String getSshPassword() {
+			return vm.sshPassword;
+		}
+		
+		public List<String> exec(String command) throws Exception {
+			return Ssh.exec(this, command);
+		}
+		
+		public void receiveFile(String lfile, String rfile) throws Exception {
+			Ssh.receiveFile(this, lfile, rfile);
+		}
+		
+		public void sendFile(String lfile, String rfile) throws Exception {
+			Ssh.sendFile(this, lfile, rfile);
+		}
+		
+		private Instance(VirtualMachine vm, String id, String spotRequestId) {
 			this.id = id;
 			this.spotRequestId = spotRequestId;
+			this.vm = vm;
+			
+			ip = null;
+		}
+		
+		public String getIp() {
+			if (ip != null)
+				return ip;
+			
+			if (id == null) {
+				getSpotStatus();
+				if (id == null)
+					return null;
+			}
+			
+			connect();
+			
+			DescribeInstancesRequest instanceReq = new DescribeInstancesRequest();
+			List<String> instanceIds = new ArrayList<String>();
+			instanceIds.add(id);
+			instanceReq.setInstanceIds(instanceIds);
+			
+			DescribeInstancesResult instanceRes = client.describeInstances(instanceReq);
+			
+			try {
+				ip = instanceRes.getReservations().get(0).getInstances().get(0).getPublicIpAddress();
+			} catch (Exception e) {
+				logger.error("Error while getting the IP.", e);
+				ip = null;
+			}
+			
+			return ip;
+		}
+		
+		public SpotState getSpotStatus() {
+			if (spotRequestId == null)
+				return SpotState.SPOT_REQUEST_NOT_FOUND;
+			
+			connect();
+			
+			DescribeSpotInstanceRequestsRequest spotInstanceReq = new DescribeSpotInstanceRequestsRequest();
+			List<String> spotInstanceRequestIds = new ArrayList<String>();
+			spotInstanceRequestIds.add(spotRequestId);
+			spotInstanceReq.setSpotInstanceRequestIds(spotInstanceRequestIds);
+			DescribeSpotInstanceRequestsResult res = client.describeSpotInstanceRequests(spotInstanceReq);
+			
+			List<SpotInstanceRequest> reqs = res.getSpotInstanceRequests();
+			if (reqs.size() > 0) {
+				SpotInstanceRequest req = reqs.get(0);
+				id = req.getInstanceId();
+				return SpotState.valueFromRequest(req);
+			}
+			else {
+				logger.error("No spot request found for the given id (" + spotRequestId + ").");
+				return SpotState.SPOT_REQUEST_NOT_FOUND;
+			}
+		}
+		
+		public InstanceStatus getInstanceStatus() {
+			if (id == null) {
+				getSpotStatus();
+				if (id == null)
+					return InstanceStatus.INSTANCE_NOT_FOUND;
+			}
+			
+			connect();
+			
+			DescribeInstanceStatusRequest instanceReq = new DescribeInstanceStatusRequest();
+			List<String> instanceIds = new ArrayList<String>();
+			instanceIds.add(id);
+			instanceReq.setInstanceIds(instanceIds);
+			DescribeInstanceStatusResult instanceRes = client.describeInstanceStatus(instanceReq);
+			
+			List<com.amazonaws.services.ec2.model.InstanceStatus> reqs = instanceRes.getInstanceStatuses();
+			if (reqs.size() > 0)
+				return InstanceStatus.valueFromStatus(reqs.get(0));
+			else {
+				logger.error("No instance found for the given id (" + id + ").");
+				return InstanceStatus.INSTANCE_NOT_FOUND;
+			}
+		}
+		
+		public void terminate() throws AmazonServiceException {
+			terminateSpotRequest();
+			terminateInstance();
+			
+			ip = null;
+		}
+		
+		private void terminateSpotRequest() throws AmazonServiceException {
+			connect();
+			
+			List<String> spotInstanceRequestIds = new ArrayList<String>();
+			spotInstanceRequestIds.add(spotRequestId);
+			
+			CancelSpotInstanceRequestsRequest cancelRequest = new CancelSpotInstanceRequestsRequest(spotInstanceRequestIds);
+			client.cancelSpotInstanceRequests(cancelRequest);
+		}
+		
+		private void terminateInstance() throws AmazonServiceException {
+			connect();
+			
+			List<String> instanceIds = new ArrayList<String>();
+			instanceIds.add(id);
+			
+		    TerminateInstancesRequest terminateRequest = new TerminateInstancesRequest(instanceIds);
+		    client.terminateInstances(terminateRequest);
+		}
+		
+		public boolean waitUntilRunning() {
+			return waitUntilRunning(false);
+		}
+		
+		public boolean waitUntilRunning(boolean initializedIsEnough) {
+			SpotState spotState = getSpotStatus();
+			
+			while (spotState == SpotState.OPEN) {
+				try {
+					Thread.sleep(10*1000);
+					spotState = getSpotStatus();
+				} catch (InterruptedException e) {
+					logger.error("Error while waiting.", e);
+				}
+			}
+				
+			if (spotState != SpotState.ACTIVE) {
+				logger.error("The spot request failed to start and is in the " + spotState.getState() + " state!");
+				return false;
+			}
+			
+			try {
+				Thread.sleep(10*1000);
+			} catch (InterruptedException e) {
+				logger.error("Error while waiting.", e);
+			}
+			
+			InstanceStatus instanceStatus = getInstanceStatus();
+			
+			while (instanceStatus == InstanceStatus.INSTANCE_NOT_FOUND || instanceStatus == InstanceStatus.INITIALIZING) {
+				try {
+					if (instanceStatus == InstanceStatus.INITIALIZING && initializedIsEnough) {
+						instanceStatus = InstanceStatus.OK;
+					} else {
+						Thread.sleep(10*1000);
+						instanceStatus = getInstanceStatus();
+					}
+				} catch (InterruptedException e) {
+					logger.error("Error while waiting.", e);
+				}
+			}
+			if (instanceStatus != InstanceStatus.OK) {
+				logger.error("The instance is in the " + instanceStatus.getStatus() + " state!");
+				return false;
+			}
+			
+			return true;
 		}
 	}
 	
@@ -564,5 +629,5 @@ public class VirtualMachine {
 			return ERROR;
 		}
 	}
-	
+
 }

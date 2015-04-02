@@ -1,9 +1,8 @@
 package it.polimi.hadoop.hadoopnn;
 
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.net.URL;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
@@ -30,19 +29,26 @@ public class Configuration {
 
 	public static final String SECURITY_GROUP_FILE_NAME = "securitygroupcreated.txt";
 	
-	public static String ACTUAL_CONFIGURATION = CONFIGURATION;
-	
 	static {
 		try {
-			URL url = Configuration.class.getResource(CONFIGURATION);
-			if (url == null)
-				url = Configuration.class.getResource("/" + CONFIGURATION);
-			loadConfiguration(url.getFile());
+			loadConfiguration(CONFIGURATION);
 		} catch (Exception e) {
 			logger.error("Error while configuring the system.", e);
 		}
+		
+		try {
+			AWS_CREDENTIALS = new PropertiesCredentials(getInputStream(CREDENTIALS));
+		} catch (Exception e) {
+			AWS_CREDENTIALS = null;
+		}
 	}
 	
+	public static InputStream getInputStream(String filePath) {
+		InputStream is = Configuration.class.getResourceAsStream(filePath);
+		if (is == null)
+			is = Configuration.class.getResourceAsStream("/" + filePath);
+		return is;
+	}
 	
 	public static void saveConfiguration(String filePath) throws IOException {
 		FileOutputStream fos = new FileOutputStream(filePath);
@@ -56,23 +62,10 @@ public class Configuration {
 	
 	public static void loadConfiguration(String filePath) throws IOException {
 		Properties prop = new Properties();
-		FileInputStream fis = new FileInputStream(filePath);
-		prop.load(fis);
-		
-		String actualCredentials = CREDENTIALS;
-		URL url = Configuration.class.getResource(CREDENTIALS);
-		if (url == null)
-			actualCredentials = "/" + actualCredentials;
-		
-		try {
-			AWS_CREDENTIALS = new PropertiesCredentials(Configuration.class.getResourceAsStream(actualCredentials));
-		} catch (Exception e) {
-			AWS_CREDENTIALS = null;
-		}
+		InputStream is = getInputStream(filePath);
+		prop.load(is);
 		
 		REGION = prop.getProperty("REGION", REGION);
-		
-		ACTUAL_CONFIGURATION = filePath;
 	}
 	
 	public static List<String> checkValidity() {
