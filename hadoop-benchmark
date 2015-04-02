@@ -1,0 +1,31 @@
+#!/bin/sh
+
+export HADOOP_HOME="${HADOOP_HOME:-$PWD}"
+
+if [ ! -e "$HADOOP_HOME" ]
+then
+    echo "$HADOOP_HOME does not exist" 1>&2
+    exit 1
+fi
+
+JAR="$HADOOP_HOME/hadoop-benchmark.jar"
+if [ ! -e "$JAR" ]
+then
+    echo "Can't find jarfile to run"
+    exit 1
+fi
+
+# Deal with Cygwin path issues
+cygwin=false
+case "`uname`" in
+    CYGWIN*) cygwin=true;;
+esac
+if [ "$cygwin" = "true" ]
+then
+    JAR=`cygpath -w "$JAR"`
+    HADOOP_HOME=`cygpath -w "$HADOOP_HOME"`
+fi
+
+JVM_ARGS=${JVM_ARGS:--Xmx1200M}
+
+exec java  $JVM_ARGS -jar "$JAR" "$@"
